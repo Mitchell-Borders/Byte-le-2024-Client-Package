@@ -20,7 +20,7 @@ class Client(UserClient):
         Allows the team to set a team name.
         :return: Your team name
         """
-        return 'Unpaid Intern'
+        return 'Big Sean and Quiet Mitch'
     
     def first_turn_init(self, world, avatar):
         """
@@ -66,7 +66,7 @@ class Client(UserClient):
                 actions = [ActionType.MINE]
             else:
                 # If I'm mining and I'm not standing on an ore, move randomly
-                actions = [random.choice([ActionType.MOVE_LEFT, ActionType.MOVE_RIGHT, ActionType.MOVE_UP, ActionType.MOVE_DOWN])]
+                actions = [random.choice([ActionType.MOVE_RIGHT, ActionType.MOVE_UP])]
                 
         return actions
 
