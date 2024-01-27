@@ -13,6 +13,7 @@ class State(Enum):
     MINING = auto()
     SELLING = auto()
 
+
 class Node:
     def __init__(self, parent=None, position=None):
         self.parent = parent
@@ -25,10 +26,12 @@ class Node:
     def __eq__(self, other):
         return self.position == other.position
 
+
 class Client(UserClient):
     # Variables and info you want to save between turns go here
     def __init__(self):
         super().__init__()
+        self.not_in_middle = True
 
     def team_name(self):
         """
@@ -36,7 +39,7 @@ class Client(UserClient):
         :return: Your team name
         """
         return 'AlumniNotLegacy'
-    
+
     def first_turn_init(self, world: GameBoard, mobbot: Avatar):
         """
         This is where you can put setup for things that should happen at the beginning of the first turn
@@ -57,29 +60,15 @@ class Client(UserClient):
         if turn == 1:
             self.first_turn_init(world, mobbot)
 
-        if turn == 2:
-            return [ActionType.MOVE_RIGHT]
-        
-        if turn == 3:
-            return [ActionType.MOVE_RIGHT]
-        
-        if turn == 4:
-            return [ActionType.MOVE_UP]
-        a_star_path = []
-        if mobbot.position != self.base_position:
-            print(f"mobbot.position: {mobbot.position}")
-            print(f"self.base_position: {self.base_position}")
-            a_star_path = self.a_star_search(world.game_map, mobbot.position, self.base_position)
+        if self.not_in_middle:
+            if mobbot.position.x == 7 and mobbot.position.y == 7:
+                self.not_in_middle = False
+            else:
+                return self.a_star_search(world.game_map, mobbot.position, Vector(7, 7))
 
-        a_star_path = self.a_star_search(world.game_map, mobbot.position, Vector(12, 12))
-        
-        # if turn == 7:
-        #     a_star_path = self.a_star_search(world.game_map, mobbot.position, self.base_position)
-        print(f"a_star_path: {a_star_path}")
-        return a_star_path
-            
-        current_tile = world.game_map[mobbot.position.y][mobbot.position.x] # set current tile to the tile that I'm standing on
-        
+        # set current tile to the tile that I'm standing on
+        current_tile = world.game_map[mobbot.position.y][mobbot.position.x]
+
         # If I start the turn on my station, I should...
         if current_tile.occupied_by.object_type == self.my_station_type:
             # buy Improved Mining tech if I can...
@@ -87,23 +76,27 @@ class Client(UserClient):
                 return [ActionType.BUY_IMPROVED_DRIVETRAIN]
             # otherwise set my state to mining
             self.current_state = State.MINING
-            
+
         # If I have at least 5 items in my inventory, set my state to selling
-        if len([item for item in self.get_my_inventory(world) if item is not None]) >= 5:
+        if len([item for item in self.get_my_inventory(world) if item is not None]) >= 18:
             self.current_state = State.SELLING
-            
+            if mobbot.position == self.base_position:
+                self.not_in_middle = True
+
         # Make action decision for this turn
         if self.current_state == State.SELLING:
             # actions = [ActionType.MOVE_LEFT if self.company == Company.TURING else ActionType.MOVE_RIGHT] # If I'm selling, move towards my base
-            actions = self.a_star_search(world.game_map, mobbot.position, self.base_position)
+            actions = self.a_star_search(
+                world.game_map, mobbot.position, self.base_position)
         else:
             if current_tile.occupied_by.object_type == ObjectType.ORE_OCCUPIABLE_STATION:
                 # If I'm mining and I'm standing on an ore, mine it
                 actions = [ActionType.MINE]
             else:
                 # If I'm mining and I'm not standing on an ore, move randomly
-                actions = [random.choice([ActionType.MOVE_RIGHT, ActionType.MOVE_DOWN, ActionType.MOVE_LEFT, ActionType.MOVE_UP])]
-                
+                actions = [random.choice(
+                    [ActionType.MOVE_RIGHT, ActionType.MOVE_DOWN, ActionType.MOVE_LEFT, ActionType.MOVE_UP])]
+
         return actions
 
     def generate_moves(self, start_position, end_position, vertical_first):
@@ -117,19 +110,21 @@ class Client(UserClient):
         """
         dx = end_position.x - start_position.x
         dy = end_position.y - start_position.y
-        
-        horizontal = [ActionType.MOVE_LEFT] * -dx if dx < 0 else [ActionType.MOVE_RIGHT] * dx
-        vertical = [ActionType.MOVE_UP] * -dy if dy < 0 else [ActionType.MOVE_DOWN] * dy
-        
+
+        horizontal = [ActionType.MOVE_LEFT] * - \
+            dx if dx < 0 else [ActionType.MOVE_RIGHT] * dx
+        vertical = [ActionType.MOVE_UP] * - \
+            dy if dy < 0 else [ActionType.MOVE_DOWN] * dy
+
         return vertical + horizontal if vertical_first else horizontal + vertical
-    
+
     def get_my_inventory(self, world: GameBoard):
         return world.inventory_manager.get_inventory(self.company)
 
-
     def a_star_search(self, map, start, end):
         def is_valid_tile(next):
-            invalid_objects = {ObjectType.WALL, ObjectType.LANDMINE, ObjectType.TRAP, ObjectType.EMP}
+            invalid_objects = {
+                ObjectType.WALL, ObjectType.LANDMINE, ObjectType.TRAP, ObjectType.EMP}
             next = (next[1], next[0])
             for invalid_object in invalid_objects:
                 if map[next[1]][next[0]].get_occupied_by(invalid_object):
@@ -161,13 +156,13 @@ class Client(UserClient):
                 path = []
                 while current is not None:
                     if current == start:
-                        pass # Or some other value that indicates the start
+                        pass  # Or some other value that indicates the start
                     else:
                         path.append(came_from[current][0])
                     current = came_from[current][1] if current != start else None
-                    
+
                 path.reverse()
-                return path # Exclude the None at the end
+                return path  # Exclude the None at the end
 
             for direction, action in directions.items():
                 next = (current[0] + direction[0], current[1] + direction[1])
@@ -178,10 +173,9 @@ class Client(UserClient):
                 new_cost = cost_so_far[current] + 1
                 if next not in cost_so_far or new_cost < cost_so_far[next]:
                     cost_so_far[next] = new_cost
-                    priority = new_cost + abs(end[0] - next[0]) + abs(end[1] - next[1])
+                    priority = new_cost + \
+                        abs(end[0] - next[0]) + abs(end[1] - next[1])
                     heapq.heappush(open_list, (priority, next))
                     came_from[next] = (action, current)
 
-
         return random.choice([ActionType.MOVE_RIGHT, ActionType.MOVE_DOWN, ActionType.MOVE_LEFT, ActionType.MOVE_UP])
-
