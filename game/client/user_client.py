@@ -12,6 +12,7 @@ class UserClient:
         if self.debug and Debug.level >= self.debug_level:
             logging.basicConfig(level=logging.DEBUG)
             for arg in args:
+                
                 logging.debug(f'{self.__class__.__name__}: {arg}')
 
     def team_name(self):
