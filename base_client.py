@@ -41,7 +41,7 @@ class Client(UserClient):
         Allows the team to set a team name.
         :return: Your team name
         """
-        return 'AlumniNotLegacy'
+        return 'Broken'
 
     def first_turn_init(self, world: GameBoard, mobbot: Avatar):
         """
@@ -51,7 +51,7 @@ class Client(UserClient):
         self.my_station_type = ObjectType.TURING_STATION if self.company == Company.TURING else ObjectType.CHURCH_STATION
         self.current_state = State.MINING
         self.base_position = world.get_objects(self.my_station_type)[0][0]
-        self.mine_back = [8, 15, 48]
+        self.mine_back = [16, 32, 48]
         self.cur_mine_index = 0
 
 
@@ -67,21 +67,27 @@ class Client(UserClient):
         current_tile = world.game_map[mobbot.position.y][mobbot.position.x] # set current tile to the tile that I'm standing on
         if turn == 1:
             self.first_turn_init(world, mobbot)
-        elif current_tile.occupied_by.object_type == ObjectType.ORE_OCCUPIABLE_STATION and current_tile.get_occupied_by(ObjectType.ORE_OCCUPIABLE_STATION).held_item and len([item for item in self.get_my_inventory(world) if item is not None]) < 50:
-            # If I'm mining and I'm standing on an ore, mine it
-            actions = [ActionType.MINE]
-        elif len([item for item in self.get_my_inventory(world) if item is not None]) > self.mine_back[self.cur_mine_index]:
+        if len([item for item in self.get_my_inventory(world) if item is not None]) > self.mine_back[self.cur_mine_index] and not self.can_purchase(mobbot, world):
             self.current_state = State.SELLING
+        elif mobbot.position == self.base_position and State.SELLING == self.current_state:
+            if not self.can_purchase(mobbot, world):
+                self.current_state = State.MINING
+
+        if State.MINING == self.current_state:
+            # If I'm mining and I'm standing on an ore, mine it
+            if len([item for item in self.get_my_inventory(world) if item is not None]) < 50:
+                if current_tile.occupied_by.object_type == ObjectType.ORE_OCCUPIABLE_STATION and current_tile.get_occupied_by(ObjectType.ORE_OCCUPIABLE_STATION).held_item:
+                    actions = [ActionType.MINE]
+                else:
+                    near = self.find_around(mobbot.position, world)
+                    actions = self.a_star_search(world.game_map, mobbot.position, near)
+        elif State.SELLING == self.current_state:
             actions = self.a_star_search(world.game_map, mobbot.position, self.base_position)
-        elif State.MINING == self.current_state:
-            near = self.find_around(mobbot.position, world)
-            actions = self.a_star_search(world.game_map, mobbot.position, near)
-        elif mobbot.position == self.base_position and self.can_purchase(mobbot) and State.SELLING == self.current_state:
-            # buy Improved Mining tech if I can...
-            actions = self.shop_for_tech(mobbot)
-            # otherwise set my state to mining
-            self.current_state = State.MINING
-            self.cur_mine_index = min(len(self.mine_back) - 1, self.cur_mine_index + 1)
+            if mobbot.position == self.base_position:
+                actions = self.shop_for_tech(mobbot)
+                self.current_state = State.MINING
+                self.cur_mine_index = min(len(self.mine_back) - 1, self.cur_mine_index + 1)
+            
         if turn >= 191:
             self.current_state = State.SELLING
             actions = self.a_star_search(world.game_map, mobbot.position, self.base_position)
@@ -91,15 +97,19 @@ class Client(UserClient):
         # print(f"turn: {turn} state: {self.current_state}")
         return actions
     
-    def can_purchase(self, mobbot: Avatar):
-        if mobbot.science_points >= mobbot.get_tech_info('Improved Drivetrain').cost\
-        or mobbot.science_points >= mobbot.get_tech_info('Improved Mining').cost\
-        or mobbot.science_points >= mobbot.get_tech_info('Superior Drivetrain').cost\
-        or mobbot.science_points >= mobbot.get_tech_info('Superior Mining').cost\
-        or mobbot.science_points >= mobbot.get_tech_info('Overdrive Drivetrain').cost\
-        or mobbot.science_points >= mobbot.get_tech_info('Overdrive Mining').cost\
+    def can_purchase(self, mobbot: Avatar, world: GameBoard):
+        total_potential_sp = mobbot.science_points
+        print(total_potential_sp)
+        if total_potential_sp >= mobbot.get_tech_info('Improved Drivetrain').cost and not mobbot.is_researched('Improved Drivetrain')\
+        or total_potential_sp >= mobbot.get_tech_info('Improved Mining').cost and not mobbot.is_researched('Improved Mining')\
+        or total_potential_sp >= mobbot.get_tech_info('Superior Drivetrain').cost and not mobbot.is_researched('Superior Drivetrain')\
+        or total_potential_sp >= mobbot.get_tech_info('Superior Mining').cost and not mobbot.is_researched('Superior Mining')\
+        or total_potential_sp >= mobbot.get_tech_info('Overdrive Drivetrain').cost and not mobbot.is_researched('Overdrive Drivetrain')\
+        or total_potential_sp >= mobbot.get_tech_info('Overdrive Mining').cost and not mobbot.is_researched('Overdrive Mining')\
             :
+            print(f"total_potential_sp: {total_potential_sp}")
             return True
+        return False
         
 
     def shop_for_tech(self, mobbot: Avatar):
@@ -125,9 +135,11 @@ class Client(UserClient):
                     for mult in range(1, 15):
                         new_x = start_position.x - (x * mult)
                         new_y = start_position.y - (y * mult)
-                        if 0 <= new_y < len(gm) and 0 <= new_x < len(gm[0]):
+                        if 0 <= new_y < 14 and 0 <= new_x < 14:
                             if world.game_map[new_y][new_x].occupied_by != None and world.game_map[new_y][new_x].occupied_by.object_type == ObjectType.ORE_OCCUPIABLE_STATION and world.game_map[new_y][new_x].get_occupied_by(ObjectType.ORE_OCCUPIABLE_STATION).held_item:
                                 return Vector(new_x, new_y)
+                        else:
+                            print(f"x {new_x} y {new_y}")
 
     def get_my_inventory(self, world: GameBoard):
         return world.inventory_manager.get_inventory(self.company)
