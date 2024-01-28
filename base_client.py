@@ -10,8 +10,10 @@ import heapq
 
 
 class State(Enum):
+    START = auto()
     MINING = auto()
     SELLING = auto()
+    UPGRADING = auto()
 
 
 class Node:
@@ -32,13 +34,14 @@ class Client(UserClient):
     def __init__(self):
         super().__init__()
         self.not_in_middle = True
+        self.prev_position = None
 
     def team_name(self):
         """
         Allows the team to set a team name.
         :return: Your team name
         """
-        return 'AlumniNotLegacy'
+        return 'Epic'
 
     def first_turn_init(self, world: GameBoard, mobbot: Avatar):
         """
@@ -48,6 +51,11 @@ class Client(UserClient):
         self.my_station_type = ObjectType.TURING_STATION if self.company == Company.TURING else ObjectType.CHURCH_STATION
         self.current_state = State.MINING
         self.base_position = world.get_objects(self.my_station_type)[0][0]
+        self.mine_back = [10, 16, 48]
+        self.cur_mine_index = 0
+        self.max = 14
+        self.min = -1
+
 
     # This is where your AI will decide what to do
     def take_turn(self, turn, actions, world: GameBoard, mobbot: Avatar):
@@ -57,63 +65,87 @@ class Client(UserClient):
         :param actions:     This is the actions object that you will add effort allocations or decrees to.
         :param world:       Generic world information
         """
+        actions = []
+        current_tile = world.game_map[mobbot.position.y][mobbot.position.x] # set current tile to the tile that I'm standing on
         if turn == 1:
             self.first_turn_init(world, mobbot)
-
-        if self.not_in_middle:
-            if mobbot.position.x == 7 and mobbot.position.y == 7:
-                self.not_in_middle = False
-            else:
-                return self.a_star_search(world.game_map, mobbot.position, Vector(7, 7))
-
-        # set current tile to the tile that I'm standing on
-        current_tile = world.game_map[mobbot.position.y][mobbot.position.x]
-
-        # If I start the turn on my station, I should...
-        if current_tile.occupied_by.object_type == self.my_station_type:
-            # buy Improved Mining tech if I can...
-            self.shop_for_tech(mobbot)
-            # otherwise set my state to mining
+        if len([item for item in self.get_my_inventory(world) if item is not None]) > self.mine_back[self.cur_mine_index]:
+            self.current_state = State.SELLING
+        elif mobbot.position == self.base_position and State.SELLING == self.current_state:
+            self.current_state = State.UPGRADING
+            self.max = 12
+            self.min = 1
+        elif self.current_state == State.UPGRADING:
             self.current_state = State.MINING
 
-        # If I have at least 5 items in my inventory, set my state to selling
-        if len([item for item in self.get_my_inventory(world) if item is not None]) >= 18:
-            self.current_state = State.SELLING
-            if mobbot.position == self.base_position:
-                self.not_in_middle = True
-
-        # Make action decision for this turn
-        if self.current_state == State.SELLING:
-            # actions = [ActionType.MOVE_LEFT if self.company == Company.TURING else ActionType.MOVE_RIGHT] # If I'm selling, move towards my base
-            actions = self.a_star_search(
-                world.game_map, mobbot.position, self.base_position)
-        else:
-            if current_tile.occupied_by.object_type == ObjectType.ORE_OCCUPIABLE_STATION:
-                # If I'm mining and I'm standing on an ore, mine it
+        if State.MINING == self.current_state:
+            # If I'm mining and I'm standing on an ore, mine it
+            if len([item for item in self.get_my_inventory(world) if item is not None]) < 50:
+                if current_tile.occupied_by.object_type == ObjectType.ORE_OCCUPIABLE_STATION and current_tile.get_occupied_by(ObjectType.ORE_OCCUPIABLE_STATION).held_item:
+                    actions = [ActionType.MINE]
+                else:
+                    near = self.find_around(mobbot.position, world)
+                    actions = self.a_star_search(world.game_map, mobbot.position, near)
+        elif State.SELLING == self.current_state:
+                actions = self.a_star_search(world.game_map, mobbot.position, self.base_position)
+        elif State.UPGRADING == self.current_state:
+            actions = self.shop_for_tech(mobbot)
+            self.current_state = State.MINING
+            self.cur_mine_index = min(len(self.mine_back) - 1, self.cur_mine_index + 1)
+        if len([item for item in self.get_my_inventory(world) if item is not None]) < 50:
+            if current_tile.occupied_by.object_type == ObjectType.ORE_OCCUPIABLE_STATION and current_tile.get_occupied_by(ObjectType.ORE_OCCUPIABLE_STATION).held_item:
                 actions = [ActionType.MINE]
-            else:
-                # If I'm mining and I'm not standing on an ore, move randomly
-                actions = [random.choice(
-                    [ActionType.MOVE_RIGHT, ActionType.MOVE_DOWN, ActionType.MOVE_LEFT, ActionType.MOVE_UP])]
+            
+        if turn >= 190:
+            self.current_state = State.SELLING
+            actions = self.a_star_search(world.game_map, mobbot.position, self.base_position)
 
+        self.prev_position = mobbot.position
+        if actions == None or isinstance(actions, ActionType) or len(actions) == 0:
+            actions = [ActionType.MINE]
+        # print(f"actions: {actions}")
+        # print(f"turn: {turn} state: {self.current_state}")
         return actions
     
+    def can_purchase(self, mobbot: Avatar, world: GameBoard):
+        total_potential_sp = mobbot.science_points
+        if total_potential_sp >= mobbot.get_tech_info('Improved Drivetrain').cost and not mobbot.is_researched('Improved Drivetrain')\
+        or total_potential_sp >= mobbot.get_tech_info('Improved Mining').cost and not mobbot.is_researched('Improved Mining')\
+        or total_potential_sp >= mobbot.get_tech_info('Superior Drivetrain').cost and not mobbot.is_researched('Superior Drivetrain')\
+        or total_potential_sp >= mobbot.get_tech_info('Superior Mining').cost and not mobbot.is_researched('Superior Mining')\
+        or total_potential_sp >= mobbot.get_tech_info('Overdrive Drivetrain').cost and not mobbot.is_researched('Overdrive Drivetrain')\
+        or total_potential_sp >= mobbot.get_tech_info('Overdrive Mining').cost and not mobbot.is_researched('Overdrive Mining')\
+            :
+            return True
+        return False
+        
+
     def shop_for_tech(self, mobbot: Avatar):
-        if mobbot.science_points >= mobbot.get_tech_info('Improved Drivetrain').cost and not mobbot.is_researched('Improved Drivetrain'):
-            return [ActionType.BUY_IMPROVED_DRIVETRAIN]
-        elif mobbot.science_points >= mobbot.get_tech_info('Improved Mining').cost and not mobbot.is_researched('Improved Mining'):
+        if not mobbot.is_researched('Improved Mining'):
             return [ActionType.BUY_IMPROVED_MINING]
-        elif mobbot.science_points >= mobbot.get_tech_info('Superior Drivetrain').cost and not mobbot.is_researched('Superior Drivetrain'):
+        elif not mobbot.is_researched('Improved Drivetrain'):
+            return [ActionType.BUY_IMPROVED_DRIVETRAIN]
+        elif not mobbot.is_researched('Superior Drivetrain'):
             return [ActionType.BUY_SUPERIOR_DRIVETRAIN]
-        elif mobbot.science_points >= mobbot.get_tech_info('Superior Mining').cost and not mobbot.is_researched('Superior Mining'):
+        elif not mobbot.is_researched('Superior Mining'):
             return [ActionType.BUY_SUPERIOR_MINING]
-        elif mobbot.science_points >= mobbot.get_tech_info('Overdrive Drivetrain').cost and not mobbot.is_researched('Overdrive Drivetrain'):
+        elif not mobbot.is_researched('Overdrive Drivetrain'):
             return [ActionType.BUY_OVERDRIVE_DRIVETRAIN]
-        elif mobbot.science_points >= mobbot.get_tech_info('Overdrive Mining').cost and not mobbot.is_researched('Overdrive Mining'):
+        elif not mobbot.is_researched('Overdrive Mining'):
             return [ActionType.BUY_OVERDRIVE_MINING]
         else:
             return None
         
+    def find_around(self, start_position, world):
+            gm = world.game_map
+            for mult in range(1, 15):
+                for x in range(-1, 2):
+                    for y in range(-1, 2):
+                            new_x = start_position.x - (x * mult)
+                            new_y = start_position.y - (y * mult)
+                            if self.min <= new_y < self.max and self.min <= new_x < self.max:
+                                if world.game_map[new_y][new_x].occupied_by != None and world.game_map[new_y][new_x].occupied_by.object_type == ObjectType.ORE_OCCUPIABLE_STATION and world.game_map[new_y][new_x].get_occupied_by(ObjectType.ORE_OCCUPIABLE_STATION).held_item:
+                                    return Vector(new_x, new_y)
 
     def get_my_inventory(self, world: GameBoard):
         return world.inventory_manager.get_inventory(self.company)
@@ -121,7 +153,7 @@ class Client(UserClient):
     def a_star_search(self, map, start, end):
         def is_valid_tile(next):
             invalid_objects = {
-                ObjectType.WALL, ObjectType.LANDMINE, ObjectType.TRAP, ObjectType.EMP}
+                ObjectType.WALL, ObjectType.TRAP, ObjectType.AVATAR}
             next = (next[1], next[0])
             for invalid_object in invalid_objects:
                 if map[next[1]][next[0]].get_occupied_by(invalid_object):
@@ -134,6 +166,7 @@ class Client(UserClient):
         end = (end[1], end[0])
 
         open_list = []
+
         heapq.heappush(open_list, (0, start))
 
         came_from = {start: None}
