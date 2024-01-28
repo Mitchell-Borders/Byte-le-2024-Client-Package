@@ -41,7 +41,7 @@ class Client(UserClient):
         Allows the team to set a team name.
         :return: Your team name
         """
-        return 'Broken'
+        return 'left'
 
     def first_turn_init(self, world: GameBoard, mobbot: Avatar):
         """
@@ -51,8 +51,10 @@ class Client(UserClient):
         self.my_station_type = ObjectType.TURING_STATION if self.company == Company.TURING else ObjectType.CHURCH_STATION
         self.current_state = State.MINING
         self.base_position = world.get_objects(self.my_station_type)[0][0]
-        self.mine_back = [8, 15, 48]
+        self.mine_back = [10, 16, 48]
         self.cur_mine_index = 0
+        self.max = 14
+        self.min = -1
 
 
     # This is where your AI will decide what to do
@@ -67,11 +69,14 @@ class Client(UserClient):
         current_tile = world.game_map[mobbot.position.y][mobbot.position.x] # set current tile to the tile that I'm standing on
         if turn == 1:
             self.first_turn_init(world, mobbot)
-        if len([item for item in self.get_my_inventory(world) if item is not None]) > self.mine_back[self.cur_mine_index] and not self.can_purchase(mobbot, world):
+        if len([item for item in self.get_my_inventory(world) if item is not None]) > self.mine_back[self.cur_mine_index]:
             self.current_state = State.SELLING
         elif mobbot.position == self.base_position and State.SELLING == self.current_state:
-            if not self.can_purchase(mobbot, world):
-                self.current_state = State.MINING
+            self.current_state = State.UPGRADING
+            self.max = 12
+            self.min = 1
+        elif self.current_state == State.UPGRADING:
+            self.current_state = State.MINING
 
         if State.MINING == self.current_state:
             # If I'm mining and I'm standing on an ore, mine it
@@ -82,24 +87,28 @@ class Client(UserClient):
                     near = self.find_around(mobbot.position, world)
                     actions = self.a_star_search(world.game_map, mobbot.position, near)
         elif State.SELLING == self.current_state:
-            actions = self.a_star_search(world.game_map, mobbot.position, self.base_position)
-            if mobbot.position == self.base_position:
-                actions = self.shop_for_tech(mobbot)
-                self.current_state = State.MINING
-                self.cur_mine_index = min(len(self.mine_back) - 1, self.cur_mine_index + 1)
+                actions = self.a_star_search(world.game_map, mobbot.position, self.base_position)
+        elif State.UPGRADING == self.current_state:
+            actions = self.shop_for_tech(mobbot)
+            self.current_state = State.MINING
+            self.cur_mine_index = min(len(self.mine_back) - 1, self.cur_mine_index + 1)
+        if len([item for item in self.get_my_inventory(world) if item is not None]) < 50:
+            if current_tile.occupied_by.object_type == ObjectType.ORE_OCCUPIABLE_STATION and current_tile.get_occupied_by(ObjectType.ORE_OCCUPIABLE_STATION).held_item:
+                actions = [ActionType.MINE]
             
-        if turn >= 191:
+        if turn >= 190:
             self.current_state = State.SELLING
             actions = self.a_star_search(world.game_map, mobbot.position, self.base_position)
 
         self.prev_position = mobbot.position
+        if actions == None or isinstance(actions, ActionType) or len(actions) == 0:
+            actions = [ActionType.MINE]
         # print(f"actions: {actions}")
         # print(f"turn: {turn} state: {self.current_state}")
         return actions
     
     def can_purchase(self, mobbot: Avatar, world: GameBoard):
         total_potential_sp = mobbot.science_points
-        print(total_potential_sp)
         if total_potential_sp >= mobbot.get_tech_info('Improved Drivetrain').cost and not mobbot.is_researched('Improved Drivetrain')\
         or total_potential_sp >= mobbot.get_tech_info('Improved Mining').cost and not mobbot.is_researched('Improved Mining')\
         or total_potential_sp >= mobbot.get_tech_info('Superior Drivetrain').cost and not mobbot.is_researched('Superior Drivetrain')\
@@ -107,7 +116,6 @@ class Client(UserClient):
         or total_potential_sp >= mobbot.get_tech_info('Overdrive Drivetrain').cost and not mobbot.is_researched('Overdrive Drivetrain')\
         or total_potential_sp >= mobbot.get_tech_info('Overdrive Mining').cost and not mobbot.is_researched('Overdrive Mining')\
             :
-            print(f"total_potential_sp: {total_potential_sp}")
             return True
         return False
         
@@ -130,16 +138,14 @@ class Client(UserClient):
         
     def find_around(self, start_position, world):
             gm = world.game_map
-            for x in range(-1, 2):
-                for y in range(-1, 2):
-                    for mult in range(1, 15):
-                        new_x = start_position.x - (x * mult)
-                        new_y = start_position.y - (y * mult)
-                        if 0 <= new_y < 14 and 0 <= new_x < 14:
-                            if world.game_map[new_y][new_x].occupied_by != None and world.game_map[new_y][new_x].occupied_by.object_type == ObjectType.ORE_OCCUPIABLE_STATION and world.game_map[new_y][new_x].get_occupied_by(ObjectType.ORE_OCCUPIABLE_STATION).held_item:
-                                return Vector(new_x, new_y)
-                        else:
-                            print(f"x {new_x} y {new_y}")
+            for mult in range(1, 15):
+                for x in range(-1, 2):
+                    for y in range(-1, 2):
+                            new_x = start_position.x - (x * mult)
+                            new_y = start_position.y - (y * mult)
+                            if self.min <= new_y < self.max and self.min <= new_x < self.max:
+                                if world.game_map[new_y][new_x].occupied_by != None and world.game_map[new_y][new_x].occupied_by.object_type == ObjectType.ORE_OCCUPIABLE_STATION and world.game_map[new_y][new_x].get_occupied_by(ObjectType.ORE_OCCUPIABLE_STATION).held_item:
+                                    return Vector(new_x, new_y)
 
     def get_my_inventory(self, world: GameBoard):
         return world.inventory_manager.get_inventory(self.company)
@@ -147,7 +153,7 @@ class Client(UserClient):
     def a_star_search(self, map, start, end):
         def is_valid_tile(next):
             invalid_objects = {
-                ObjectType.WALL, ObjectType.TRAP}
+                ObjectType.WALL, ObjectType.TRAP, ObjectType.AVATAR}
             next = (next[1], next[0])
             for invalid_object in invalid_objects:
                 if map[next[1]][next[0]].get_occupied_by(invalid_object):
